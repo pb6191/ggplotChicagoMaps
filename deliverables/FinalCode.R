@@ -1,3 +1,5 @@
+# 1.	Source libraries
+
 head(highSchoolChicVoronoiPopln_sf, n=1)
 class(highSchoolChicVoronoiPopln_sf)
 library("RSocrata")
@@ -17,12 +19,16 @@ library(dplyr)
 
 options(max.print=50000)
 
+# 2.	Import victims of homicides and shootings
+
 victims_df <- read.socrata(
   "https://data.cityofchicago.org/resource/gumc-mgzr.json",
   app_token = "xEXuVLIzaFYLeOC8cBFb1Z9H0",
   email     = "pbhargava936@gmail.com",
   password  = "******"
 )
+
+# 3.	Import population by census block
 
 populationCensusBlock_df <- read.socrata(
   "https://data.cityofchicago.org/resource/5yjb-v3mj.json",
@@ -31,14 +37,18 @@ populationCensusBlock_df <- read.socrata(
   password  = "******"
 )
 
+# 4.	Import population by zip code
 
 chicagoPopln <- read.table(file = "C:/Users/PC-P14s/Desktop/createMaps/Chicago_Population_Counts.csv", 
                          sep = ";", header=TRUE)
 
+# 5.	Get high school and elementary school boundaries
 
 highSchoolBoundariesMap_sf <- st_read("C:/Users/PC-P14s/Desktop/createMaps/Chicago Public Schools - High School Attendance Boundaries SY2021.geojson")
 highSchoolBoundariesMap_sf <- highSchoolBoundariesMap_sf[-c(53), ]
 elementaryBoundariesMap_sf <- st_read("C:/Users/PC-P14s/Desktop/createMaps/Chicago Public Schools - Elementary School Attendance Boundaries SY2021.geojson")
+
+# 6.	Get school points and filter them
 
 schoolPoints_ORIG_sf <- st_read("C:/Users/PC-P14s/Desktop/createMaps/Chicago Public Schools - School Profile Information SY2021.geojson")
 schoolPoints_REM_OPTIONS_sf <- schoolPoints_ORIG_sf[(schoolPoints_ORIG_sf$network!="Options"),]
@@ -54,11 +64,15 @@ elementarySchoolPoints_sf <- schoolPoints_sf[(schoolPoints_sf$is_elementary_scho
 library("writexl")
 write_xlsx(schoolPoints_sf,"C:\\Users\\PC-P14s\\Documents\\FinalSchoolList.xlsx")
 
+# 7.	Calculating population by tract and block group
+
 populationCensusBlock_df$total_population <- as.numeric(as.character(populationCensusBlock_df$total_population))
 populationCensusBlock_df$CUSTOM_tract = substr(populationCensusBlock_df$census_block_full,1,11)
 populationCensusBlock_df$CUSTOM_block_grp = substr(populationCensusBlock_df$census_block_full,1,12)
 
 chicagoPopln<-chicagoPopln[!(chicagoPopln$Year==2019),]
+
+# 8.	Import streets and 4 types of geospatial data
 
 overlayStreets <- st_read("C:/Users/PC-P14s/Desktop/createMaps/Major_Streets/Major_Streets.shp")
 blockGroup_sf <- st_read("C:/Users/PC-P14s/Desktop/createMaps/Cook County Block Group files/tl_2010_17031_bg10.shp")
@@ -67,6 +81,7 @@ zipCode_sf <- st_read("C:/Users/PC-P14s/Desktop/createMaps/Boundaries - ZIP Code
 censusBlock_sf <- st_read("C:/Users/PC-P14s/Desktop/createMaps/Boundaries - Census Blocks - 2010.geojson")
 censusTract_sf <- st_read("C:/Users/PC-P14s/Desktop/createMaps/Boundaries - Census Tracts - 2010.geojson")
 
+# 9.	Saving populations by tract and block group in separate table
 
 blockGroup_sf$GEO_tract = substr(blockGroup_sf$GEOID10,1,11)
 onlyTractGEOIDs <- censusTract_sf$geoid10
@@ -79,8 +94,12 @@ filteredBlockGroup_sf<-blockGroup_sf[!(blockGroup_sf$present==FALSE),]
 populationCensusTract_df <- as.data.frame(xtabs(total_population ~ CUSTOM_tract, populationCensusBlock_df))
 populationCensusBlockGroup_df <- as.data.frame(xtabs(total_population ~ CUSTOM_block_grp, populationCensusBlock_df))
 
+# 10.	Splitting victims into homicides and shootings
+
 homicides_df <- filter(victims_df, primary_type != "NON-FATAL SHOOTING" & date >= "2016-08-01 00:00:00" & date <= "2021-07-31 23:59:59")
 shootings_df <- filter(victims_df, primary_type != "NON-SHOOTING HOMICIDE" & date >= "2016-08-01 00:00:00" & date <= "2021-07-31 23:59:59")
+
+# 11.	Separating homicide and shooting locations and renaming them x y
 
 homicides_pnts <- select(homicides_df, longitude, latitude)
 shootings_pnts <- select(shootings_df, longitude, latitude)
@@ -90,22 +109,31 @@ names(homicides_pnts)[2] <- "y"
 names(shootings_pnts)[1] <- "x"
 names(shootings_pnts)[2] <- "y"
 
+# 12.	Create a points collection for the coordinates
+
 homicides_pnts_sf <- do.call("st_sfc",c(lapply(1:nrow(homicides_pnts), function(i) {st_point(as.numeric(homicides_pnts[i, ]))}), list("crs" = 4326)))
 shootings_pnts_sf <- do.call("st_sfc",c(lapply(1:nrow(shootings_pnts), function(i) {st_point(as.numeric(shootings_pnts[i, ]))}), list("crs" = 4326)))
 
+# 13.	Apply transformation to the points 
+
 homicides_pnts_trans <- st_transform(homicides_pnts_sf, 2163)
 shootings_pnts_trans <- st_transform(shootings_pnts_sf, 2163)
+
+# 14.	Left outer join at all 4 geographies to connect population with map data
 
 censusBlock_sf_popln <- merge(x = censusBlock_sf, y = populationCensusBlock_df, by.x = "geoid10", by.y = "census_block_full", all.x = TRUE)
 censusTract_sf_popln <- merge(x = censusTract_sf, y = populationCensusTract_df, by.x = "geoid10", by.y = "CUSTOM_tract", all.x = TRUE)
 censusBlockGrp_sf_popln <- merge(x = filteredBlockGroup_sf, y = populationCensusBlockGroup_df, by.x = "GEOID10", by.y = "CUSTOM_block_grp", all.x = TRUE)
 censusZip_sf_popln <- merge(x = zipCode_sf, y = chicagoPopln, by.x = "zip", by.y = "Geography", all.x = TRUE)
 
+# 15.	Rename population column
+
 censusBlock_sf_popln$total_population[is.na(censusBlock_sf_popln$total_population)] <- 0
 names(censusTract_sf_popln)[names(censusTract_sf_popln) == 'Freq'] <- 'total_population'
 names(censusBlockGrp_sf_popln)[names(censusBlockGrp_sf_popln) == 'Freq'] <- 'total_population'
 names(censusZip_sf_popln)[names(censusZip_sf_popln) == 'Population...Total'] <- 'total_population'
 
+# 16.	Voronoi conversion function
 
 # Carson's Voronoi polygons function
 voronoipolygons <- function(x) {
@@ -128,6 +156,8 @@ voronoipolygons <- function(x) {
                                                                                        function(x) slot(x, 'ID'))))
 }
 
+# 17.	Extracting voronoi grids specific to Chicago
+
 highSchoolGeom_sf <- data.frame(x=as.numeric(highSchoolPoints_sf$school_longitude), y=as.numeric(highSchoolPoints_sf$school_latitude), total_population = as.numeric(highSchoolPoints_sf$student_count_total))
 highSchoolVoronoi_grid <- voronoipolygons(highSchoolGeom_sf)
 elementarySchoolGeom_sf <- data.frame(x=as.numeric(elementarySchoolPoints_sf$school_longitude), y=as.numeric(elementarySchoolPoints_sf$school_latitude), total_population = as.numeric(elementarySchoolPoints_sf$student_count_total))
@@ -144,6 +174,7 @@ elementarySchoolChicVoronoi_grid <- intersect(elementarySchoolVoronoi_grid, chic
 elementarySchoolChicVoronoi_sf <- st_as_sf(elementarySchoolChicVoronoi_grid)
 elementarySchoolChicVoronoiPopln_sf <- merge(x = elementarySchoolChicVoronoi_sf, y = elementarySchoolGeom_sf, by.x = "x", by.y = "x", all.x = TRUE, all.y = TRUE)
 
+# 18.	Changing NA population to 0
 
 censusTract_sf_popln$total_population[is.na(censusTract_sf_popln$total_population)] <- 0
 censusBlockGrp_sf_popln$total_population[is.na(censusBlockGrp_sf_popln$total_population)] <- 0
@@ -151,10 +182,13 @@ censusZip_sf_popln$total_population[is.na(censusZip_sf_popln$total_population)] 
 highSchoolChicVoronoiPopln_sf$total_population[is.na(highSchoolChicVoronoiPopln_sf$total_population)] <- 0
 elementarySchoolChicVoronoiPopln_sf$total_population[is.na(elementarySchoolChicVoronoiPopln_sf$total_population)] <- 0
 
+# 19.	Tweaking population for 2 zip codes that appear twice after the merge
+
 censusZip_sf_popln$total_population <- as.numeric(gsub(",","",censusZip_sf_popln$total_population))
 censusZip_sf_popln$total_population[censusZip_sf_popln$zip == '60643'] <- censusZip_sf_popln$total_population[censusZip_sf_popln$zip == '60643']/2
 censusZip_sf_popln$total_population[censusZip_sf_popln$zip == '60707'] <- censusZip_sf_popln$total_population[censusZip_sf_popln$zip == '60707']/2
 
+# 20.	Create an index column to number the geographical areas
 
 censusBlock_sf_popln$index <- 1:nrow(censusBlock_sf_popln)
 censusTract_sf_popln$index <- 1:nrow(censusTract_sf_popln)
@@ -165,6 +199,8 @@ elementaryBoundariesMap_sf$index <- 1:nrow(elementaryBoundariesMap_sf)
 highSchoolChicVoronoiPopln_sf$index <- 1:nrow(highSchoolChicVoronoiPopln_sf)
 elementarySchoolChicVoronoiPopln_sf$index <- 1:nrow(elementarySchoolChicVoronoiPopln_sf)
 
+# 21.	Apply transformation to all maps
+
 censusBlock_trans <- st_transform(censusBlock_sf_popln, 2163)
 censusTract_trans <- st_transform(censusTract_sf_popln, 2163)
 censusBlockGrp_trans <- st_transform(censusBlockGrp_sf_popln, 2163)
@@ -173,6 +209,8 @@ highSchoolBoundariesMap_trans <- st_transform(highSchoolBoundariesMap_sf, 2163)
 elementaryBoundariesMap_trans <- st_transform(elementaryBoundariesMap_sf, 2163)
 highSchoolChicVoronoiPopln_trans <- st_transform(highSchoolChicVoronoiPopln_sf, 2163)
 elementarySchoolChicVoronoiPopln_trans <- st_transform(elementarySchoolChicVoronoiPopln_sf, 2163)
+
+# 22.	Get indices of all geographies for shootings and homicides
 
 homicides_df$WhichHighVor <- apply(st_intersects(highSchoolChicVoronoiPopln_trans, homicides_pnts_trans, sparse = FALSE), 2, 
                                 function(col) { 
@@ -253,6 +291,9 @@ shootings_df$WhichElementaryVor <- apply(st_intersects(elementarySchoolChicVoron
                                       function(col) { 
                                         elementarySchoolChicVoronoiPopln_trans[which(col), ]$index
                                       })
+
+# 23.	Removing non-intersections [values that read ‘integer(0)’] homicides
+
 homicides_onlyCensusBlock <- homicides_df$WhichCensusBlock
 homicides_onlyCensusTract <- homicides_df$WhichCensusTract
 homicides_onlyCensusGroup <- homicides_df$WhichCensusGroup
@@ -270,6 +311,8 @@ shootings_onlyHigh <- shootings_df$WhichHigh
 shootings_onlyElementary <- shootings_df$WhichElementary
 shootings_onlyHighVor <- shootings_df$WhichHighVor
 shootings_onlyElementaryVor <- shootings_df$WhichElementaryVor
+
+# 24.	Convert lists to data frame
 
 homicides_onlyCensusBlock_filtered <- compact(homicides_onlyCensusBlock)
 homicides_onlyCensusTract_filtered <- compact(homicides_onlyCensusTract)
@@ -311,6 +354,8 @@ shootings_onlyElementary_filtered_df <- do.call(rbind.data.frame, shootings_only
 shootings_onlyHighVor_filtered_df <- do.call(rbind.data.frame, shootings_onlyHighVor_filtered)
 shootings_onlyElementaryVor_filtered_df <- do.call(rbind.data.frame, shootings_onlyElementaryVor_filtered)
 
+# 25.	Rename the column in the dataframe and create a frequency distribution
+
 names(homicides_onlyCensusBlock_filtered_df)[1] <- "WhichCensusBlock"
 names(homicides_onlyCensusTract_filtered_df)[1] <- "WhichCensusTract"
 names(homicides_onlyCensusGroup_filtered_df)[1] <- "WhichCensusGroup"
@@ -347,6 +392,8 @@ shootings_freqDist_elementary <- data.frame(table(shootings_onlyElementary_filte
 shootings_freqDist_highVor <- data.frame(table(shootings_onlyHighVor_filtered_df$WhichHighVor))
 shootings_freqDist_elementaryVor <- data.frame(table(shootings_onlyElementaryVor_filtered_df$WhichElementaryVor))
 
+# 26.	Left outer join the map+population data with the frequency distribution created in previous step
+
 censusBlock_sf_popln_homicides_freq <- merge(x = censusBlock_sf_popln, y = homicides_freqDist, by.x = "index", by.y = "Var1", all.x = TRUE)
 censusTract_sf_popln_homicides_freq <- merge(x = censusTract_sf_popln, y = homicides_freqDist_tract, by.x = "index", by.y = "Var1", all.x = TRUE)
 censusGroup_sf_popln_homicides_freq <- merge(x = censusBlockGrp_sf_popln, y = homicides_freqDist_group, by.x = "index", by.y = "Var1", all.x = TRUE)
@@ -364,6 +411,8 @@ high_sf_popln_shootings_freq <- merge(x = highSchoolBoundariesMap_sf, y = shooti
 elementary_sf_popln_shootings_freq <- merge(x = elementaryBoundariesMap_sf, y = shootings_freqDist_elementary, by.x = "index", by.y = "Var1", all.x = TRUE)
 highVor_sf_popln_shootings_freq <- merge(x = highSchoolChicVoronoiPopln_sf, y = shootings_freqDist_highVor, by.x = "index", by.y = "Var1", all.x = TRUE)
 elementaryVor_sf_popln_shootings_freq <- merge(x = elementarySchoolChicVoronoiPopln_sf, y = shootings_freqDist_elementaryVor, by.x = "index", by.y = "Var1", all.x = TRUE)
+
+# 27.	Change the NA values to 0 after the join and calculating the 5-year average and per capita values
 
 censusBlock_sf_popln_homicides_freq$Freq[is.na(censusBlock_sf_popln_homicides_freq$Freq)] <- 0
 censusTract_sf_popln_homicides_freq$Freq[is.na(censusTract_sf_popln_homicides_freq$Freq)] <- 0
@@ -430,6 +479,7 @@ censusZip_sf_popln_shootings_freq$FreqPerCapita <- censusZip_sf_popln_shootings_
 highVor_sf_popln_shootings_freq$FreqPerCapita <- highVor_sf_popln_shootings_freq$Freq / highVor_sf_popln_shootings_freq$total_population
 elementaryVor_sf_popln_shootings_freq$FreqPerCapita <- elementaryVor_sf_popln_shootings_freq$Freq / elementaryVor_sf_popln_shootings_freq$total_population
 
+# 28.	Distort into cartograms
 
 library(cartogram)
 censusZip_sf_popln_homicides_freq_projected <- st_transform(censusZip_sf_popln_homicides_freq, 26916)
@@ -454,7 +504,7 @@ highVor_sf_popln_shootings_freq_projected_cart <- cartogram_cont(highVor_sf_popl
 elementaryVor_sf_popln_homicides_freq_projected_cart <- cartogram_cont(elementaryVor_sf_popln_homicides_freq_projected_rmna, "total_population", itermax=15, maxSizeError = 1.0001, prepare="adjust", threshold = 0.05)
 elementaryVor_sf_popln_shootings_freq_projected_cart <- cartogram_cont(elementaryVor_sf_popln_shootings_freq_projected_rmna, "total_population", itermax=15, maxSizeError = 1.0001, prepare="adjust", threshold = 0.05)
 
-
+# 29.	Label the centroids of cartograms – NOT BEING USED
 
 censusZip_sf_popln_homicides_freq_projected_cart$zipCode <- censusZip_sf_popln_homicides_freq_projected_cart$zip
 censusZip_sf_popln_shootings_freq_projected_cart$zipCode <- censusZip_sf_popln_shootings_freq_projected_cart$zip
@@ -476,6 +526,8 @@ censusZip_sf_popln_homicides_freq_projected_cart$x <- censusZip_homicides_centro
 censusZip_sf_popln_homicides_freq_projected_cart$y <- censusZip_homicides_centroids$y
 censusZip_sf_popln_shootings_freq_projected_cart$x <- censusZip_shootings_centroids$x
 censusZip_sf_popln_shootings_freq_projected_cart$y <- censusZip_shootings_centroids$y
+
+# 30.	Plot and save all maps
 
 ggplot() + geom_sf(data = censusBlock_sf_popln_homicides_freq, mapping = aes(fill = log10(Freq), colour = log10(Freq)), size = 0.0 ) + guides(colour = "none") + scale_color_viridis(option = "mako", direction = -1, na.value = "white") + scale_fill_viridis(option="mako", direction = -1, name = "Homicides \nper Year", na.value = "white", breaks = c(0, 1, 2, 3), labels = c(1, 10, 100, 1000)) + theme(axis.text = element_blank(), axis.ticks = element_blank(), panel.grid  = element_blank(), plot.title = element_text(size = 20, hjust = 0.5), legend.position = c(0.2, 0.2), legend.key.size = unit(1, "cm"), legend.title = element_text(size = 12), legend.text = element_text(size = 12), legend.background = element_rect(fill = "transparent")) + labs(title = "Yearly Homicides \nin Chicago by Census Block", caption = "Data provided by the Chicago Police Department and accessed from the Chicago Data Portal.\nHomicides are victims in that database classified as non-shooting homicide or fatal shooting.\nData from August 1, 2016 -  July 31, 2021.") + geom_sf(data = overlayStreets, fill = NA, size = 0.0, color = "grey")
 ggsave("Yearly Homicides in Chicago by Census Block.png", width = 8.5, height = 11, units = "in")
